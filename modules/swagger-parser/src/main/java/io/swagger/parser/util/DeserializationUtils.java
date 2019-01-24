@@ -1,20 +1,25 @@
 package io.swagger.parser.util;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.swagger.models.Swagger;
 import io.swagger.util.Json;
 import io.swagger.util.Yaml;
-import org.apache.commons.lang3.builder.ReflectionToStringBuilder;
-import org.apache.commons.lang3.builder.ToStringStyle;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
+import org.yaml.snakeyaml.nodes.MappingNode;
+import org.yaml.snakeyaml.nodes.Node;
+import org.yaml.snakeyaml.nodes.NodeTuple;
+import org.yaml.snakeyaml.nodes.Tag;
 
 import java.io.IOException;
+import java.util.List;
 
-/**
- * Created by russellb337 on 7/14/15.
- */
 public class DeserializationUtils {
+
+    public static Integer maxDepth = 500;
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(DeserializationUtils.class);
+
     public static JsonNode deserializeIntoTree(String contents, String fileOrHost) {
         JsonNode result;
 
@@ -61,13 +66,84 @@ public class DeserializationUtils {
         return contents.toString().trim().startsWith("{");
     }
 
-    public static JsonNode readYamlTree(String contents) {
-        org.yaml.snakeyaml.Yaml yaml = new org.yaml.snakeyaml.Yaml(new SafeConstructor());
-        return Json.mapper().convertValue(yaml.load(contents), JsonNode.class);
+    public static JsonNode readYamlTree(String contents) throws IOException {
+
+        try {
+            org.yaml.snakeyaml.Yaml yaml = new org.yaml.snakeyaml.Yaml(new CustomSnakeYamlConstructor());
+            return Json.mapper().convertValue(yaml.load(contents), JsonNode.class);
+        } catch (Throwable e) {
+            LOGGER.warn("Error snake-parsing yaml content", e);
+            return Yaml.mapper().readTree(contents);
+        }
     }
 
     public static <T> T readYamlValue(String contents, Class<T> expectedType) {
-        org.yaml.snakeyaml.Yaml yaml = new org.yaml.snakeyaml.Yaml(new SafeConstructor());
-        return Json.mapper().convertValue(yaml.load(contents), expectedType);
+        try {
+            org.yaml.snakeyaml.Yaml yaml = new org.yaml.snakeyaml.Yaml(new CustomSnakeYamlConstructor());
+            return Json.mapper().convertValue(yaml.load(contents), expectedType);
+        } catch (Throwable e) {
+            return Yaml.mapper().convertValue(contents, expectedType);
+        }
+    }
+
+    static class SnakeException extends RuntimeException {
+        public SnakeException() {
+            super();
+        }
+        public SnakeException(String msg) {
+            super(msg);
+        }
+
+        public SnakeException(String message, Throwable cause) {
+            super(message, cause);
+        }
+
+    }
+
+    static class CustomSnakeYamlConstructor extends SafeConstructor {
+
+        private boolean checkNode(MappingNode node, Integer depth) {
+            if (node.getValue() == null) return true;
+            if (depth > maxDepth) return false;
+            int currentDepth = depth;
+            List<NodeTuple> list = node.getValue();
+            for (NodeTuple t : list) {
+                Node n = t.getKeyNode();
+                if (n instanceof MappingNode) {
+                    boolean res = checkNode((MappingNode) n, currentDepth + 1);
+                    if (!res) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        @Override
+        public Object getSingleData(Class<?> type) {
+            try {
+                Node node = this.composer.getSingleNode();
+                if (node != null) {
+                    if (node instanceof MappingNode) {
+                        if (!checkNode((MappingNode) node, new Integer(0))) {
+                            throw new SnakeException("yaml tree depth exceeds max " + maxDepth);
+                        }
+                    }
+                    if (Object.class != type) {
+                        node.setTag(new Tag(type));
+                    } else if (this.rootTag != null) {
+                        node.setTag(this.rootTag);
+                    }
+
+                    return this.constructDocument(node);
+                } else {
+                    return null;
+                }
+            } catch (StackOverflowError e) {
+                throw new SnakeException("StackOverflow safe-checking yaml content (maxDepth " + maxDepth + ")", e);
+            } catch (Throwable e) {
+                throw new SnakeException("Exception safe-checking yaml content  (maxDepth " + maxDepth + ")", e);
+            }
+        }
     }
 }

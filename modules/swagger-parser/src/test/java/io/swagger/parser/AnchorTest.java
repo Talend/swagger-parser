@@ -1,14 +1,17 @@
 package io.swagger.parser;
 
 import io.swagger.models.ModelImpl;
+import io.swagger.models.Swagger;
 import io.swagger.parser.util.SwaggerDeserializationResult;
-import org.testng.annotations.Test;
+import org.junit.Test;
 
 import java.util.Arrays;
 
 import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertNull;
 
 public class AnchorTest {
+
     @Test
     public void testIssue146() {
         String yaml = "swagger: '2.0'\n" +
@@ -47,4 +50,15 @@ public class AnchorTest {
         ModelImpl model = (ModelImpl) result.getSwagger().getDefinitions().get("OperationType");
         assertEquals(model.getEnum(), Arrays.asList("registration"));
     }
+
+    @org.junit.Test
+    public void testIssue998() throws Exception{
+
+        //DeserializationUtils.maxDepth = 500000;
+        Swagger result = new SwaggerParser().read("issue_998.yaml");
+        assertNull(result);
+
+    }
+
+
 }
